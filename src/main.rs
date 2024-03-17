@@ -3,6 +3,7 @@ use std::{
     path::Path,
 };
 
+use sysinfo::System;
 use winsafe::{
     co::{SPI, SPIF},
     prelude::user_Hwnd,
@@ -18,7 +19,7 @@ fn main() {
     let config_path = Path::new(CONFIG_PATH);
 
     // create the config file if not exists
-    if folder_path.exists() {
+    if !folder_path.exists() {
         fs::create_dir(folder_path)
             .expect("failed to create config folder, consider creating it manually");
     }
@@ -33,7 +34,7 @@ fn main() {
         .lines()
         .collect::<Vec<&str>>()
         .iter()
-        .map(|s| s.to_string())
+        .map(|s| s.to_string().to_lowercase())
         .collect::<Vec<String>>();
 
     // get mouse info
@@ -42,30 +43,50 @@ fn main() {
         SystemParametersInfo(SPI::GETMOUSE, 0, &mut mouse_params, SPIF::from_raw(0u32))
             .expect("failed to get mouse info from winapi, maybe you're not running Windows");
 
+        let mut temp: String = String::new();
         loop {
-            let (_, process_name) = get_active_window();
-            if lines.contains(&process_name) {
-                // disable the enhance pointer precision for games
-                mouse_params[2] = 0;
-            } else {
-                // enable the enhance pointer precision for other applications
-                mouse_params[2] = 1;
+            let (_, mut process_name) = get_active_window();
+            process_name = process_name.to_lowercase();
+            if process_name != temp.to_lowercase() && process_name != "" {
+                // foreground process changed
+                temp = process_name.clone();
+                println!("foreground process changed: {}", process_name);
+
+                if lines.contains(&process_name) {
+                    // disable the enhance pointer precision for games
+                    mouse_params[2] = 0;
+                } else {
+                    // enable the enhance pointer precision for other applications
+                    mouse_params[2] = 1;
+                }
+                SystemParametersInfo(SPI::SETMOUSE, 0, &mut mouse_params, SPIF::SENDCHANGE)
+                    .and_then(|_| {
+                        println!("set mouse info: {} -> {}", process_name, mouse_params[2]);
+                        println!();
+                        Ok(())
+                    })
+                    .expect(&format!(
+                        "failed to set mouse info: {} -> {}",
+                        process_name, mouse_params[2]
+                    ));
             }
-            SystemParametersInfo(SPI::SETMOUSE, 0, &mut mouse_params, SPIF::SENDCHANGE).expect(
-                &format!(
-                    "failed to set mouse info: ({}) {} -> {}",
-                    process_name, !mouse_params[2], mouse_params[2]
-                ),
-            );
         }
     }
 }
 
 fn get_active_window() -> (u32, String) {
+    let system = System::new_all();
     if let Some(hwnd) = <HWND as user_Hwnd>::GetForegroundWindow() {
         let (_, pid) = user_Hwnd::GetWindowThreadProcessId(&hwnd);
-        let name = user_Hwnd::GetWindowText(&hwnd).expect("failed to get process name");
-        return (pid, name);
+        // let name = user_Hwnd::GetWindowText(&hwnd).expect("failed to get process name");
+        let name = system
+            .processes()
+            .iter()
+            .find(|(ppid, _)| ppid.as_u32() == pid)
+            .expect("failed to get process name")
+            .1
+            .name();
+        return (pid, name.to_string());
     }
 
     // if api fails, return 0 and empty string
