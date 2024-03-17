@@ -1,6 +1,11 @@
+// hide the console window
+#![windows_subsystem = "windows"]
+
 use std::{
     fs::{self, File},
     path::Path,
+    thread::{self},
+    time::Duration,
 };
 
 use sysinfo::System;
@@ -70,6 +75,9 @@ fn main() {
                         process_name, mouse_params[2]
                     ));
             }
+
+            // loops take very high cpu usage, using `thread::sleep` to reduce
+            thread::sleep(Duration::from_millis(1000));
         }
     }
 }
